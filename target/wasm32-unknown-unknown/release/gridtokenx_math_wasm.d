@@ -1,0 +1,1 @@
+/Users/chanthawat/Developments/gridtokenx-platform-infa/gridtokenx-math-wasm/target/wasm32-unknown-unknown/release/gridtokenx_math_wasm.wasm: /Users/chanthawat/Developments/gridtokenx-platform-infa/gridtokenx-math-wasm/src/lib.rs
