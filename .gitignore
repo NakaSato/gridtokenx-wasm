@@ -1,0 +1,14 @@
+# Rust
+/target
+Cargo.lock
+
+# WASM (wasm-pack)
+/pkg
+
+# OS
+.DS_Store
+
+# IDE
+.vscode
+.idea
+*.swp
