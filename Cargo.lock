@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "gridtokenx-math-wasm"
+name = "gridtokenx-wasm"
 version = "0.1.0"
