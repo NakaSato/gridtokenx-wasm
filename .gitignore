@@ -5,6 +5,11 @@ Cargo.lock
 # WASM (wasm-pack)
 /pkg
 
+# Web Application
+node_modules
+dist
+*.local
+
 # OS
 .DS_Store
 
