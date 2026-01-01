@@ -1,17 +1,22 @@
+//! Map Point Clustering Module
+//! 
+//! High-performance point clustering for map marker visualization.
+
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
 #[derive(Clone, Copy)]
-pub struct Point {
-    pub x: f64, // Web Mercator X (0..1)
-    pub y: f64, // Web Mercator Y (0..1)
-    pub id: u32,
-    pub lat: f64,
-    pub lng: f64,
+struct Point {
+    x: f64, // Web Mercator X (0..1)
+    y: f64, // Web Mercator Y (0..1)
+    id: u32,
+    lat: f64,
+    lng: f64,
 }
 
 static mut POINTS: Vec<Point> = Vec::new();
 static mut OUTPUT_BUFFER: Vec<f64> = Vec::new();
+static mut BUFFER: [f64; 20000] = [0.0; 20000];
 
 // Web Mercator projection helpers
 fn lng_to_x(lng: f64) -> f64 {
@@ -24,6 +29,15 @@ fn lat_to_y(lat: f64) -> f64 {
     y.clamp(0.0, 1.0)
 }
 
+struct ClusterData {
+    sum_x: f64,
+    sum_y: f64,
+    sum_lat: f64,
+    sum_lng: f64,
+    count: u32,
+    first_id: u32,
+}
+
 #[no_mangle]
 pub extern "C" fn load_points(ptr: *const f64, count: usize) {
     unsafe {
@@ -33,7 +47,7 @@ pub extern "C" fn load_points(ptr: *const f64, count: usize) {
         for i in 0..count {
             let lat = input[i * 3];
             let lng = input[i * 3 + 1];
-            let id = input[i * 3 + 2] as u32; // Assuming ID is passed as f64 for simplicity in array
+            let id = input[i * 3 + 2] as u32;
             
             POINTS.push(Point {
                 x: lng_to_x(lng),
@@ -46,15 +60,6 @@ pub extern "C" fn load_points(ptr: *const f64, count: usize) {
     }
 }
 
-struct ClusterData {
-    sum_x: f64,
-    sum_y: f64,
-    sum_lat: f64,
-    sum_lng: f64,
-    count: u32,
-    first_id: u32, // To track the ID if it's a single point
-}
-
 #[no_mangle]
 pub extern "C" fn get_clusters(
     min_lng: f64, min_lat: f64,
@@ -64,23 +69,17 @@ pub extern "C" fn get_clusters(
     unsafe {
         OUTPUT_BUFFER.clear();
         
-        // Convert bounds to Mercator
         let min_x = lng_to_x(min_lng);
         let max_x = lng_to_x(max_lng);
-        let min_y = lat_to_y(max_lat); // Y is flipped in Mercator (0 at top)
+        let min_y = lat_to_y(max_lat);
         let max_y = lat_to_y(min_lat);
 
-        // Grid size calculations
-        // World size is 1.0. At zoom Z, we have roughly 2^Z tiles.
-        // We want a cluster radius of approx 40-60px. Tile is 256px.
-        // Grid cells per world dimension ~= 2^zoom * (256/radius).
         let radius = 60.0;
         let cells = (2.0f64.powf(zoom) * (256.0 / radius)).ceil();
         
         let mut grid: HashMap<(i32, i32), ClusterData> = HashMap::new();
 
         for point in &POINTS {
-            // Filter by bounds (simple check)
             if point.x < min_x || point.x > max_x || point.y < min_y || point.y > max_y {
                 continue;
             }
@@ -104,11 +103,8 @@ pub extern "C" fn get_clusters(
             entry.count += 1;
         }
         
-        // Write results to buffer
-        // Format: [lat, lng, count, id]
         for data in grid.values() {
             let count_f = data.count as f64;
-            // Use average Lat/Lng for centroid
             let avg_lat = data.sum_lat / count_f;
             let avg_lng = data.sum_lng / count_f;
             
@@ -120,6 +116,11 @@ pub extern "C" fn get_clusters(
         
         OUTPUT_BUFFER.len() / 4
     }
+}
+
+#[no_mangle]
+pub extern "C" fn get_buffer_ptr() -> *mut f64 {
+    unsafe { BUFFER.as_mut_ptr() }
 }
 
 #[no_mangle]
