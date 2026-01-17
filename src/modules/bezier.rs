@@ -2,15 +2,16 @@
 //! 
 //! Quadratic Bezier curve generation for energy flow visualization.
 
-#[no_mangle]
-pub extern "C" fn calculate_bezier(
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+pub fn calculate_bezier(
     x1: f64, y1: f64,
     x2: f64, y2: f64,
     curve_intensity: f64,
     segments: usize,
-    ptr: *mut f64
-) -> usize {
-    let buffer = unsafe { std::slice::from_raw_parts_mut(ptr, (segments + 1) * 2) };
+) -> Vec<f64> {
+    let mut buffer = Vec::with_capacity((segments + 1) * 2);
 
     let mid_x = (x1 + x2) / 2.0;
     let mid_y = (y1 + y2) / 2.0;
@@ -36,12 +37,13 @@ pub extern "C" fn calculate_bezier(
         let t = i as f64 / segments as f64;
         let one_minus_t = 1.0 - t;
 
-        let x = one_minus_t * one_minus_t * x1 + 2.0 * one_minus_t * t * cx + t * t * x2;
-        let y = one_minus_t * one_minus_t * y1 + 2.0 * one_minus_t * t * cy + t * t * y2;
+        // Quadratic Bezier formula
+        let x = one_minus_t.powi(2) * x1 + 2.0 * one_minus_t * t * cx + t.powi(2) * x2;
+        let y = one_minus_t.powi(2) * y1 + 2.0 * one_minus_t * t * cy + t.powi(2) * y2;
 
-        buffer[i * 2] = x;
-        buffer[i * 2 + 1] = y;
+        buffer.push(x);
+        buffer.push(y);
     }
 
-    segments + 1
+    buffer
 }

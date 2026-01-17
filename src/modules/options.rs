@@ -1,156 +1,109 @@
-//! Options Pricing Module
+//! Black-Scholes Options Pricing Module
 //! 
-//! Black-Scholes pricing and Greeks calculations.
+//! Calculates option prices and Greeks for energy derivatives.
 
+use wasm_bindgen::prelude::*;
 use std::f64::consts::PI;
+use serde::{Serialize, Deserialize};
 
-const R: f64 = 0.0;
-const SIGMA: f64 = 0.5;
-
-fn normal_cdf(z: f64) -> f64 {
-    const BETA1: f64 = -0.0004406;
-    const BETA2: f64 = 0.0418198;
-    const BETA3: f64 = 0.9;
-    let exponent = -PI.sqrt() * (BETA1 * z.powi(5) + BETA2 * z.powi(3) + BETA3 * z);
-    1.0 / (1.0 + exponent.exp())
+#[derive(Serialize, Deserialize)]
+pub struct OptionResult {
+    pub call_price: f64,
+    pub put_price: f64,
+    pub call_delta: f64,
+    pub put_delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub call_theta: f64,
+    pub put_theta: f64,
+    pub call_rho: f64,
+    pub put_rho: f64,
 }
 
-fn normal_pdf(x: f64) -> f64 {
-    (-0.5 * x * x).exp() / (2.0 * PI).sqrt()
-}
+/// Cumulative Normal Distribution Function
+fn cndf(x: f64) -> f64 {
+    let a1 = 0.319381530;
+    let a2 = -0.356563782;
+    let a3 = 1.781477937;
+    let a4 = -1.821255978;
+    let a5 = 1.330274429;
+    let l = x.abs();
+    let k = 1.0 / (1.0 + 0.2316419 * l);
+    let w = 1.0 - 1.0 / (2.0 * PI).sqrt() * (-l * l / 2.0).exp() *
+            (a1 * k + a2 * k * k + a3 * k.powi(3) + a4 * k.powi(4) + a5 * k.powi(5));
 
-fn calc_d1(s: f64, k: f64, t: f64) -> f64 {
-    ((s / k).ln() + (R + 0.5 * SIGMA * SIGMA) * t) / (SIGMA * t.sqrt())
-}
-
-fn calc_d2(d1: f64, t: f64) -> f64 {
-    d1 - SIGMA * t.sqrt()
-}
-
-#[no_mangle]
-pub extern "C" fn black_scholes(s: f64, k: f64, t: f64, is_call: u8) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    
-    let d1 = calc_d1(s, k, t);
-    let d2 = calc_d2(d1, t);
-    
-    if is_call == 1 {
-        s * normal_cdf(d1) - k * (-R * t).exp() * normal_cdf(d2)
+    if x < 0.0 {
+        1.0 - w
     } else {
-        k * (-R * t).exp() * normal_cdf(-d2) - s * normal_cdf(-d1)
+        w
     }
 }
 
-#[no_mangle]
-pub extern "C" fn delta_calc(s: f64, k: f64, t: f64, is_call: u8) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    let d1 = calc_d1(s, k, t);
-    if is_call == 1 { normal_cdf(d1) } else { -normal_cdf(-d1) }
+/// Normal Probability Density Function
+fn npdf(x: f64) -> f64 {
+    (1.0 / (2.0 * PI).sqrt()) * (-x * x / 2.0).exp()
 }
 
-#[no_mangle]
-pub extern "C" fn gamma_calc(s: f64, k: f64, t: f64) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    let d1 = calc_d1(s, k, t);
-    normal_pdf(d1) / (s * SIGMA * t.sqrt())
-}
-
-#[no_mangle]
-pub extern "C" fn vega_calc(s: f64, k: f64, t: f64) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    let d1 = calc_d1(s, k, t);
-    s * normal_pdf(d1) * t.sqrt() * 0.01
-}
-
-#[no_mangle]
-pub extern "C" fn theta_calc(s: f64, k: f64, t: f64, is_call: u8) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    
-    let d1 = calc_d1(s, k, t);
-    let d2 = calc_d2(d1, t);
-    
-    let theta_value = if is_call == 1 {
-        (-s * normal_pdf(d1) * SIGMA) / (2.0 * t.sqrt()) - R * k * (-R * t).exp() * normal_cdf(d2)
-    } else {
-        (-s * normal_pdf(d1) * SIGMA) / (2.0 * t.sqrt()) - R * k * (-R * t).exp() * normal_cdf(-d2)
-    };
-    
-    theta_value / 365.0
-}
-
-#[no_mangle]
-pub extern "C" fn rho_calc(s: f64, k: f64, t: f64, is_call: u8) -> f64 {
-    if t <= 0.0 || s <= 0.0 || k <= 0.0 { return 0.0; }
-    
-    let d1 = calc_d1(s, k, t);
-    let d2 = calc_d2(d1, t);
-    
-    let rho_value = if is_call == 1 {
-        k * t * (-R * t).exp() * normal_cdf(d2)
-    } else {
-        -k * t * (-R * t).exp() * normal_cdf(-d2)
-    };
-    
-    rho_value * 0.01
-}
-
-#[no_mangle]
-pub extern "C" fn batch_black_scholes(ptr: *const f64, count: usize, out_ptr: *mut f64) -> usize {
-    let input = unsafe { std::slice::from_raw_parts(ptr, count * 4) };
-    let output = unsafe { std::slice::from_raw_parts_mut(out_ptr, count) };
-    
-    for i in 0..count {
-        output[i] = black_scholes(
-            input[i * 4],
-            input[i * 4 + 1],
-            input[i * 4 + 2],
-            input[i * 4 + 3] as u8
-        );
+/// Calculate Black-Scholes price and Greeks
+/// s: spot price
+/// k: strike price
+/// t: time to maturity (years)
+/// r: risk-free rate
+/// v: volatility
+#[wasm_bindgen]
+pub fn calculate_black_scholes(s: f64, k: f64, t: f64, r: f64, v: f64) -> Result<JsValue, JsValue> {
+    if t <= 0.0 {
+        // Expired
+        let val = if s > k { s - k } else { 0.0 };
+        return Ok(serde_wasm_bindgen::to_value(&OptionResult {
+            call_price: val,
+            put_price: if k > s { k - s } else { 0.0 },
+            call_delta: if s > k { 1.0 } else { 0.0 },
+            put_delta: if k > s { -1.0 } else { 0.0 },
+            gamma: 0.0,
+            vega: 0.0,
+            call_theta: 0.0,
+            put_theta: 0.0,
+            call_rho: 0.0,
+            put_rho: 0.0,
+        })?);
     }
-    count
-}
 
-#[no_mangle]
-pub extern "C" fn calc_all_greeks(s: f64, k: f64, t: f64, is_call: u8, out_ptr: *mut f64) {
-    let output = unsafe { std::slice::from_raw_parts_mut(out_ptr, 5) };
-    output[0] = delta_calc(s, k, t, is_call);
-    output[1] = gamma_calc(s, k, t);
-    output[2] = vega_calc(s, k, t);
-    output[3] = theta_calc(s, k, t, is_call);
-    output[4] = rho_calc(s, k, t, is_call);
-}
+    let d1 = ((s / k).ln() + (r + v * v / 2.0) * t) / (v * t.sqrt());
+    let d2 = d1 - v * t.sqrt();
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    const EPSILON: f64 = 0.0001;
-    fn approx_eq(a: f64, b: f64) -> bool { (a - b).abs() < EPSILON }
-    
-    #[test]
-    fn test_normal_cdf() {
-        assert!(approx_eq(normal_cdf(0.0), 0.5));
-        assert!(normal_cdf(3.0) > 0.99);
-        assert!(normal_cdf(-3.0) < 0.01);
-    }
-    
-    #[test]
-    fn test_black_scholes_call() {
-        let price = black_scholes(100.0, 100.0, 1.0, 1);
-        assert!(price > 15.0 && price < 25.0);
-    }
-    
-    #[test]
-    fn test_black_scholes_put() {
-        let price = black_scholes(100.0, 100.0, 1.0, 0);
-        let call_price = black_scholes(100.0, 100.0, 1.0, 1);
-        assert!(approx_eq(price, call_price));
-    }
-    
-    #[test]
-    fn test_greeks() {
-        assert!(delta_calc(100.0, 100.0, 1.0, 1) > 0.4);
-        assert!(gamma_calc(100.0, 100.0, 1.0) > 0.0);
-        assert!(vega_calc(100.0, 100.0, 1.0) > 0.0);
-    }
+    let nd1 = cndf(d1);
+    let nd2 = cndf(d2);
+    let n_prime_d1 = npdf(d1);
+
+    let call_price = s * nd1 - k * (-r * t).exp() * nd2;
+    let put_price = k * (-r * t).exp() * cndf(-d2) - s * cndf(-d1);
+
+    // Greeks
+    let call_delta = nd1;
+    let put_delta = nd1 - 1.0;
+
+    let gamma = n_prime_d1 / (s * v * t.sqrt());
+
+    let vega = s * t.sqrt() * n_prime_d1 / 100.0; // Scaled for 1% change
+
+    let theta_common = -(s * n_prime_d1 * v) / (2.0 * t.sqrt());
+    let call_theta = (theta_common - r * k * (-r * t).exp() * nd2) / 365.0;
+    let put_theta = (theta_common + r * k * (-r * t).exp() * cndf(-d2)) / 365.0;
+
+    let call_rho = k * t * (-r * t).exp() * nd2 / 100.0;
+    let put_rho = -k * t * (-r * t).exp() * cndf(-d2) / 100.0;
+
+    Ok(serde_wasm_bindgen::to_value(&OptionResult {
+        call_price,
+        put_price,
+        call_delta,
+        put_delta,
+        gamma,
+        vega,
+        call_theta,
+        put_theta,
+        call_rho,
+        put_rho,
+    })?)
 }

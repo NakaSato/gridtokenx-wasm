@@ -2,11 +2,20 @@
 //! 
 //! High-performance point clustering for map marker visualization.
 
+use wasm_bindgen::prelude::*;
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use serde::{Serialize, Deserialize};
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct Point {
+    pub lat: f64,
+    pub lng: f64,
+    pub id: u32,
+}
 
 #[derive(Clone, Copy)]
-struct Point {
+struct InternalPoint {
     x: f64, // Web Mercator X (0..1)
     y: f64, // Web Mercator Y (0..1)
     id: u32,
@@ -14,61 +23,49 @@ struct Point {
     lng: f64,
 }
 
-static mut POINTS: Vec<Point> = Vec::new();
-static mut OUTPUT_BUFFER: Vec<f64> = Vec::new();
-static mut BUFFER: [f64; 20000] = [0.0; 20000];
-
-// Web Mercator projection helpers
-fn lng_to_x(lng: f64) -> f64 {
-    (lng + 180.0) / 360.0
+#[derive(Serialize)]
+pub struct Cluster {
+    pub lat: f64,
+    pub lng: f64,
+    pub count: u32,
+    pub id: u32, // ID of first point in cluster (for representative icon)
 }
 
-fn lat_to_y(lat: f64) -> f64 {
-    let sin_lat = (lat * PI / 180.0).sin();
-    let y = 0.5 - (0.25 * ((1.0 + sin_lat) / (1.0 - sin_lat)).ln() / PI);
-    y.clamp(0.0, 1.0)
+#[wasm_bindgen]
+pub struct Clusterer {
+    points: Vec<InternalPoint>,
 }
 
-struct ClusterData {
-    sum_x: f64,
-    sum_y: f64,
-    sum_lat: f64,
-    sum_lng: f64,
-    count: u32,
-    first_id: u32,
-}
+#[wasm_bindgen]
+impl Clusterer {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self { points: Vec::new() }
+    }
 
-#[no_mangle]
-pub extern "C" fn load_points(ptr: *const f64, count: usize) {
-    unsafe {
-        POINTS.clear();
-        let input = std::slice::from_raw_parts(ptr, count * 3);
+    pub fn load_points(&mut self, points: JsValue) -> Result<(), JsValue> {
+        let input_points: Vec<Point> = serde_wasm_bindgen::from_value(points)?;
+        self.points.clear();
+        self.points.reserve(input_points.len());
         
-        for i in 0..count {
-            let lat = input[i * 3];
-            let lng = input[i * 3 + 1];
-            let id = input[i * 3 + 2] as u32;
-            
-            POINTS.push(Point {
-                x: lng_to_x(lng),
-                y: lat_to_y(lat),
-                id,
-                lat,
-                lng,
+        for p in input_points {
+            self.points.push(InternalPoint {
+                x: lng_to_x(p.lng),
+                y: lat_to_y(p.lat),
+                id: p.id,
+                lat: p.lat,
+                lng: p.lng,
             });
         }
+        Ok(())
     }
-}
 
-#[no_mangle]
-pub extern "C" fn get_clusters(
-    min_lng: f64, min_lat: f64,
-    max_lng: f64, max_lat: f64,
-    zoom: f64
-) -> usize {
-    unsafe {
-        OUTPUT_BUFFER.clear();
-        
+    pub fn get_clusters(
+        &self,
+        min_lng: f64, min_lat: f64,
+        max_lng: f64, max_lat: f64,
+        zoom: f64
+    ) -> Result<JsValue, JsValue> {
         let min_x = lng_to_x(min_lng);
         let max_x = lng_to_x(max_lng);
         let min_y = lat_to_y(max_lat);
@@ -79,7 +76,7 @@ pub extern "C" fn get_clusters(
         
         let mut grid: HashMap<(i32, i32), ClusterData> = HashMap::new();
 
-        for point in &POINTS {
+        for point in &self.points {
             if point.x < min_x || point.x > max_x || point.y < min_y || point.y > max_y {
                 continue;
             }
@@ -102,28 +99,38 @@ pub extern "C" fn get_clusters(
             entry.sum_lng += point.lng;
             entry.count += 1;
         }
-        
+
+        let mut clusters = Vec::with_capacity(grid.len());
         for data in grid.values() {
             let count_f = data.count as f64;
-            let avg_lat = data.sum_lat / count_f;
-            let avg_lng = data.sum_lng / count_f;
-            
-            OUTPUT_BUFFER.push(avg_lat);
-            OUTPUT_BUFFER.push(avg_lng);
-            OUTPUT_BUFFER.push(count_f);
-            OUTPUT_BUFFER.push(data.first_id as f64);
+            clusters.push(Cluster {
+                lat: data.sum_lat / count_f,
+                lng: data.sum_lng / count_f,
+                count: data.count,
+                id: data.first_id,
+            });
         }
         
-        OUTPUT_BUFFER.len() / 4
+        Ok(serde_wasm_bindgen::to_value(&clusters)?)
     }
 }
 
-#[no_mangle]
-pub extern "C" fn get_buffer_ptr() -> *mut f64 {
-    unsafe { BUFFER.as_mut_ptr() }
+struct ClusterData {
+    sum_x: f64,
+    sum_y: f64,
+    sum_lat: f64,
+    sum_lng: f64,
+    count: u32,
+    first_id: u32,
 }
 
-#[no_mangle]
-pub extern "C" fn get_output_buffer_ptr() -> *const f64 {
-    unsafe { OUTPUT_BUFFER.as_ptr() }
+// Web Mercator projection helpers
+fn lng_to_x(lng: f64) -> f64 {
+    (lng + 180.0) / 360.0
+}
+
+fn lat_to_y(lat: f64) -> f64 {
+    let sin_lat = (lat * PI / 180.0).sin();
+    let y = 0.5 - (0.25 * ((1.0 + sin_lat) / (1.0 - sin_lat)).ln() / PI);
+    y.clamp(0.0, 1.0)
 }

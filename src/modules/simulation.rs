@@ -2,40 +2,111 @@
 //! 
 //! Time-based simulation of energy nodes and power flows.
 
+use wasm_bindgen::prelude::*;
 use std::f64::consts::PI;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy)]
-struct SimulationNode {
-    node_type: u8,
-    base_value: f64,
-    current_value: f64,
-    status: u8,
-    is_real: u8,
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct SimulationNode {
+    pub node_type: u8,
+    pub base_value: f64,
+    pub current_value: f64,
+    pub status: u8,
+    pub is_real: u8,
 }
 
-#[derive(Clone, Copy)]
-struct SimulationFlow {
-    #[allow(dead_code)]
-    flow_index: u32,
-    base_power: f64,
-    current_power: f64,
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct SimulationFlow {
+    pub flow_index: u32,
+    pub base_power: f64,
+    pub current_power: f64,
 }
 
-static mut SIM_NODES: Vec<SimulationNode> = Vec::new();
-static mut SIM_FLOWS: Vec<SimulationFlow> = Vec::new();
-static mut SIM_NODE_OUTPUT: Vec<f64> = Vec::new();
-static mut SIM_FLOW_OUTPUT: Vec<f64> = Vec::new();
-static mut MSG_RNG_STATE: u32 = 12345;
-
-unsafe fn rand_float() -> f64 {
-    MSG_RNG_STATE = MSG_RNG_STATE.wrapping_mul(1664525).wrapping_add(1013904223);
-    (MSG_RNG_STATE as f64) / (u32::MAX as f64)
+#[wasm_bindgen]
+pub struct Simulation {
+    nodes: Vec<SimulationNode>,
+    flows: Vec<SimulationFlow>,
+    rng_state: u32,
 }
 
-unsafe fn fluctuate(base_value: f64, percent_range: f64) -> f64 {
-    let variance = base_value * (percent_range / 100.0);
-    let rand = rand_float() * 2.0 - 1.0;
-    base_value + rand * variance
+#[wasm_bindgen]
+impl Simulation {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            flows: Vec::new(),
+            rng_state: 12345,
+        }
+    }
+
+
+
+
+
+    pub fn set_nodes(&mut self, nodes: JsValue) -> Result<(), JsValue> {
+        let nodes_vec: Vec<SimulationNode> = serde_wasm_bindgen::from_value(nodes)?;
+        self.nodes = nodes_vec;
+        Ok(())
+    }
+
+    pub fn set_flows(&mut self, flows: JsValue) -> Result<(), JsValue> {
+        let flows_vec: Vec<SimulationFlow> = serde_wasm_bindgen::from_value(flows)?;
+        self.flows = flows_vec;
+        Ok(())
+    }
+
+    pub fn update(&mut self, hour: f64, minute: f64) {
+        let minute_variation = (minute / 60.0 * PI * 2.0).sin() * 0.05;
+        let mut rng_state = self.rng_state;
+
+        // Use a closure or helper function for random numbers to avoid borrowing self
+        let mut rand_float = || {
+            rng_state = rng_state.wrapping_mul(1664525).wrapping_add(1013904223);
+            (rng_state as f64) / (u32::MAX as f64)
+        };
+
+        let fluctuate = |base_value: f64, percent_range: f64, rng: &mut dyn FnMut() -> f64| {
+            let variance = base_value * (percent_range / 100.0);
+            let rand = rng() * 2.0 - 1.0;
+            base_value + rand * variance
+        };
+
+        for node in self.nodes.iter_mut() {
+            if node.is_real == 1 {
+                continue;
+            }
+
+            let multiplier = get_time_multiplier(hour, node.node_type);
+            let base_calculated = node.base_value * multiplier * (1.0 + minute_variation);
+            let new_value = fluctuate(base_calculated, 8.0, &mut rand_float).max(0.0);
+
+            if rand_float() < 0.005 {
+                node.status = if rand_float() > 0.5 { 1 } else { 0 };
+            }
+
+            node.current_value = new_value;
+        }
+
+        let gen_multiplier = get_time_multiplier(hour, 0);
+        for flow in self.flows.iter_mut() {
+            let base = flow.base_power * gen_multiplier;
+            let new_power = fluctuate(base, 12.0, &mut rand_float).max(50.0);
+            flow.current_power = new_power;
+        }
+        
+        self.rng_state = rng_state;
+    }
+
+    /// Returns the current state of all nodes
+    pub fn get_nodes(&self) -> Result<JsValue, JsValue> {
+        Ok(serde_wasm_bindgen::to_value(&self.nodes)?)
+    }
+
+    /// Returns the current state of all flows
+    pub fn get_flows(&self) -> Result<JsValue, JsValue> {
+        Ok(serde_wasm_bindgen::to_value(&self.flows)?)
+    }
 }
 
 fn get_time_multiplier(hour: f64, node_type: u8) -> f64 {
@@ -70,86 +141,4 @@ fn get_time_multiplier(hour: f64, node_type: u8) -> f64 {
         return 0.6;
     }
     1.0
-}
-
-#[no_mangle]
-pub extern "C" fn init_simulation_nodes(ptr: *const f64, count: usize) {
-    unsafe {
-        SIM_NODES.clear();
-        let input = std::slice::from_raw_parts(ptr, count * 5);
-        
-        for i in 0..count {
-            SIM_NODES.push(SimulationNode {
-                node_type: input[i * 5] as u8,
-                base_value: input[i * 5 + 1],
-                current_value: input[i * 5 + 2],
-                status: input[i * 5 + 3] as u8,
-                is_real: input[i * 5 + 4] as u8,
-            });
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn init_simulation_flows(ptr: *const f64, count: usize) {
-    unsafe {
-        SIM_FLOWS.clear();
-        let input = std::slice::from_raw_parts(ptr, count * 2);
-        
-        for i in 0..count {
-            SIM_FLOWS.push(SimulationFlow {
-                flow_index: i as u32,
-                base_power: input[i * 2],
-                current_power: input[i * 2 + 1],
-            });
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn update_simulation(hour: f64, minute: f64) {
-    unsafe {
-        SIM_NODE_OUTPUT.clear();
-        SIM_FLOW_OUTPUT.clear();
-        
-        let minute_variation = (minute / 60.0 * PI * 2.0).sin() * 0.05;
-        
-        for node in SIM_NODES.iter_mut() {
-            if node.is_real == 1 {
-                SIM_NODE_OUTPUT.push(node.current_value);
-                SIM_NODE_OUTPUT.push(node.status as f64);
-                continue;
-            }
-            
-            let multiplier = get_time_multiplier(hour, node.node_type);
-            let base_calculated = node.base_value * multiplier * (1.0 + minute_variation);
-            let new_value = fluctuate(base_calculated, 8.0).max(0.0);
-            
-            if rand_float() < 0.005 {
-                node.status = if rand_float() > 0.5 { 1 } else { 0 };
-            }
-            
-            node.current_value = new_value;
-            SIM_NODE_OUTPUT.push(new_value);
-            SIM_NODE_OUTPUT.push(node.status as f64);
-        }
-        
-        let gen_multiplier = get_time_multiplier(hour, 0);
-        for flow in SIM_FLOWS.iter_mut() {
-            let base = flow.base_power * gen_multiplier;
-            let new_power = fluctuate(base, 12.0).max(50.0);
-            flow.current_power = new_power;
-            SIM_FLOW_OUTPUT.push(new_power);
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn get_node_output_ptr() -> *const f64 {
-    unsafe { SIM_NODE_OUTPUT.as_ptr() }
-}
-
-#[no_mangle]
-pub extern "C" fn get_flow_output_ptr() -> *const f64 {
-    unsafe { SIM_FLOW_OUTPUT.as_ptr() }
 }
