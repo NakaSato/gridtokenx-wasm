@@ -16,3 +16,12 @@ hmac = "0.12"
 hex = "0.4"
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
+curve25519-dalek = { version = "4.1", features = [
+    "rand_core",
+    "serde",
+    "digest",
+] }
+rand = "0.8"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

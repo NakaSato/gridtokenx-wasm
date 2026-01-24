@@ -5,3 +5,4 @@ pub mod options;
 pub mod orderbook;
 pub mod simulation;
 pub mod topology;
+pub mod zk;

@@ -22,6 +22,7 @@ pub use modules::options::*;
 pub use modules::orderbook::*;
 pub use modules::simulation::*;
 pub use modules::topology::*;
+pub use modules::zk::*;
 
 use wasm_bindgen::prelude::*;
 
