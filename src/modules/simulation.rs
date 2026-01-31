@@ -8,17 +8,24 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SimulationNode {
+    #[serde(rename = "type")]
     pub node_type: u8,
+    #[serde(rename = "base")]
     pub base_value: f64,
+    #[serde(rename = "current")]
     pub current_value: f64,
     pub status: u8,
+    #[serde(rename = "isReal")]
     pub is_real: u8,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SimulationFlow {
+    #[serde(rename = "index")]
     pub flow_index: u32,
+    #[serde(rename = "base")]
     pub base_power: f64,
+    #[serde(rename = "current")]
     pub current_power: f64,
 }
 
