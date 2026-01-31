@@ -6,3 +6,4 @@ pub mod orderbook;
 pub mod simulation;
 pub mod topology;
 pub mod zk;
+pub mod auction;
