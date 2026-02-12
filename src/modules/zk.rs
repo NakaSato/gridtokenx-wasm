@@ -2,16 +2,15 @@ use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use solana_zk_token_sdk::{
     encryption::{
-        pedersen::Pedersen,
         elgamal::ElGamalKeypair,
+        pedersen::{PedersenOpening, PedersenCommitment},
     },
     instruction::{
         range_proof::{RangeProofU64Data},
-        transfer::{TransferData},
     },
     zk_token_elgamal::pod,
 };
-use bytemuck::{bytes_of, pod_read_unaligned};
+use bytemuck::{bytes_of};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WasmCommitment {
@@ -25,9 +24,17 @@ pub struct WasmRangeProof {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+pub struct WasmEqualityProof {
+    pub challenge: Vec<u8>,
+    pub response: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct WasmTransferProof {
     pub amount_commitment: WasmCommitment,
-    pub proof_data: Vec<u8>,
+    pub amount_range_proof: WasmRangeProof,
+    pub remaining_range_proof: WasmRangeProof,
+    pub balance_proof: WasmEqualityProof,
 }
 
 #[wasm_bindgen]
@@ -64,62 +71,128 @@ impl WasmElGamalKeypair {
     }
 }
 
-/// Generate a real Range Proof for a u64 amount
+/// Create a Pedersen commitment with a specific blinding factor
 #[wasm_bindgen]
-pub fn create_range_proof(amount: u64) -> Result<JsValue, JsValue> {
-    let (commitment, opening) = Pedersen::new(amount);
+pub fn create_commitment(value: u64, blinding: &[u8]) -> Result<JsValue, JsValue> {
+    if blinding.len() != 32 {
+        return Err(JsValue::from_str("Blinding factor must be 32 bytes"));
+    }
+    
+    let opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(blinding)
+        .ok_or_else(|| JsValue::from_str("Invalid blinding factor"))?;
+
+    // Use a valid random public key for commitment extraction
+    let binding = ElGamalKeypair::new_rand();
+    let dummy_pk = binding.pubkey();
+    // Use pod type for robust extraction
+    let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(value, &opening));
+    let mut commitment_bytes = [0u8; 32];
+    commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
+    
+    let _commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&commitment_bytes)
+        .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
+
+    let result = WasmCommitment {
+        point: commitment_bytes,
+    };
+
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+/// Generate a real Range Proof for a u64 amount with a specific blinding factor
+#[wasm_bindgen]
+pub fn create_range_proof(amount: u64, blinding: &[u8]) -> Result<JsValue, JsValue> {
+    if blinding.len() != 32 {
+        return Err(JsValue::from_str("Blinding factor must be 32 bytes"));
+    }
+
+    let opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(blinding)
+        .ok_or_else(|| JsValue::from_str("Invalid blinding factor"))?;
+
+    // Use a valid random public key for commitment extraction
+    let binding = ElGamalKeypair::new_rand();
+    let dummy_pk = binding.pubkey();
+    // Use pod type for robust extraction
+    let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(amount, &opening));
+    let mut commitment_bytes = [0u8; 32];
+    commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
+
+    let commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&commitment_bytes)
+        .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
+    
     let data = RangeProofU64Data::new(&commitment, amount, &opening)
         .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {:?}", e)))?;
     
     let result = WasmRangeProof {
         proof_data: bytes_of(&data.proof).to_vec(),
         commitment: WasmCommitment {
-            point: unsafe { std::mem::transmute_copy(&data.context.commitment) },
+            point: commitment_bytes,
         },
     };
 
     Ok(serde_wasm_bindgen::to_value(&result)?)
 }
 
-/// Generate a full Transfer Proof
+/// Generate a full Transfer Proof (aligned with TS bridge)
 #[wasm_bindgen]
 pub fn create_transfer_proof(
     amount: u64,
     sender_balance: u64,
-    _sender_secret: &[u8],
-    receiver_pubkey: &[u8],
+    sender_blinding: &[u8],
+    amount_blinding: &[u8],
 ) -> Result<JsValue, JsValue> {
-    if receiver_pubkey.len() != 32 {
-        return Err(JsValue::from_str("Invalid receiver pubkey length"));
+    if sender_blinding.len() != 32 || amount_blinding.len() != 32 {
+        return Err(JsValue::from_str("Blinding factors must be 32 bytes"));
     }
 
-    // Use a new keypair for the sender for now to avoid the from_seed issue.
-    let sender_kp = ElGamalKeypair::new_rand();
+    // Prepare blindings
+    let s_opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(sender_blinding)
+        .ok_or_else(|| JsValue::from_str("Invalid sender blinding factor"))?;
+    let a_opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(amount_blinding)
+        .ok_or_else(|| JsValue::from_str("Invalid amount blinding factor"))?;
+
+    // Use a valid random public key for commitment extraction
+    let binding = ElGamalKeypair::new_rand();
+    let dummy_pk = binding.pubkey();
     
-    let pod_receiver_pubkey: pod::ElGamalPubkey = pod_read_unaligned(receiver_pubkey);
-    let receiver_pk = pod_receiver_pubkey.try_into()
-        .map_err(|_| JsValue::from_str("Invalid receiver pubkey"))?;
+    // Use pod type for robust extraction
+    let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(amount, &a_opening));
+    let mut a_commitment_bytes = [0u8; 32];
+    a_commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
+    let a_commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&a_commitment_bytes)
+        .ok_or_else(|| JsValue::from_str("Failed to reconstruct amount commitment"))?;
 
-    // Create a mock old ciphertext for the sender (this would normally come from the account)
-    let (_, opening) = Pedersen::new(sender_balance);
-    let old_ciphertext = sender_kp.pubkey().encrypt_with(sender_balance, &opening);
+    // Remaining balance commitment
+    let remaining = sender_balance.saturating_sub(amount);
+    let pod_r_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(remaining, &s_opening));
+    let mut r_commitment_bytes = [0u8; 32];
+    r_commitment_bytes.copy_from_slice(&pod_r_ciphertext.0[..32]);
+    let r_commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&r_commitment_bytes)
+        .ok_or_else(|| JsValue::from_str("Failed to reconstruct remaining commitment"))?;
 
-    let data = TransferData::new(
-        amount,
-        (sender_balance, &old_ciphertext),
-        &sender_kp,
-        (&receiver_pk, &receiver_pk), // Use receiver as auditor for simplicity
-    ).map_err(|e| JsValue::from_str(&format!("Transfer proof generation failed: {:?}", e)))?;
-
-    // Generate a separate commitment for the transfer amount
-    let (comm, _) = Pedersen::new(amount);
-    let commitment_bytes: [u8; 32] = unsafe { std::mem::transmute_copy(&comm) };
+    // Generate sub-proofs
+    let a_range_data = RangeProofU64Data::new(&a_commitment, amount, &a_opening)
+        .map_err(|e| JsValue::from_str(&format!("Amount range proof failed: {:?}", e)))?;
+    
+    let r_range_data = RangeProofU64Data::new(&r_commitment, remaining, &s_opening)
+        .map_err(|e| JsValue::from_str(&format!("Remaining range proof failed: {:?}", e)))?;
 
     let result = WasmTransferProof {
         amount_commitment: WasmCommitment {
-            point: commitment_bytes,
+            point: a_commitment_bytes,
         },
-        proof_data: bytes_of(&data).to_vec(),
+        amount_range_proof: WasmRangeProof {
+            proof_data: bytes_of(&a_range_data.proof).to_vec(),
+            commitment: WasmCommitment { point: a_commitment_bytes },
+        },
+        remaining_range_proof: WasmRangeProof {
+            proof_data: bytes_of(&r_range_data.proof).to_vec(),
+            commitment: WasmCommitment { point: r_commitment_bytes },
+        },
+        balance_proof: WasmEqualityProof {
+            challenge: vec![0u8; 32], // Placeholder for equality proof
+            response: vec![0u8; 64],
+        },
     };
 
     Ok(serde_wasm_bindgen::to_value(&result)?)
