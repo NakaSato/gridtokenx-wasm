@@ -1,3 +1,4 @@
+#![allow(static_mut_refs)]
 use wasm_bindgen::prelude::*;
 use serde::{Serialize, Deserialize};
 use std::cmp::Ordering;
@@ -77,9 +78,12 @@ impl AuctionSimulator {
 
 // ============================================================================
 // FFI Exports for Manual Bridge (no-std / manual wasm)
+// FFI Exports for Manual Bridge (no-std / manual wasm)
 // ============================================================================
 
+#[allow(static_mut_refs)]
 static mut AUCTION: Option<AuctionSimulator> = None;
+#[allow(static_mut_refs)]
 static mut RESULT_BUFFER: [f64; 2] = [0.0; 2];
 
 #[no_mangle]

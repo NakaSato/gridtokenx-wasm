@@ -3,7 +3,7 @@
 > **Version**: 0.1.1  
 > **Last Updated**: February 2026
 
-Optimized Rust library compiled to WebAssembly for high-performance client-side operations. This library handles heavy computational tasks such as energy grid topology analysis, map clustering, option pricing, energy auction simulation, zero-knowledge proofs, and cryptographic operations.
+Optimized Rust library compiled to WebAssembly for high-performance client-side operations. This library handles heavy computational tasks such as energy auction simulation, zero-knowledge proofs, cryptographic operations, and P2P trading.
 
 ## 🏗 Architecture
 
@@ -23,28 +23,7 @@ The library uses `#[wasm_bindgen]` struct-based instances for each module, provi
 
 ## 📦 Modules
 
-### 1. Topology (`topology.rs`)
-Graph analysis for the energy distribution grid.
-- **Features**: Shortest path finding (Dijkstra), critical node detection (articulation points).
-
-| Export | Signature | Description |
-|--------|-----------|-------------|
-| `Topology::new()` | `() → Topology` | Create empty topology |
-| `Topology::set_graph()` | `(nodes: JsValue, edges: JsValue) → Result` | Load graph from node/edge arrays |
-| `Topology::find_path()` | `(start_id: string, end_id: string) → PathResult` | Dijkstra shortest path |
-| `Topology::find_critical_nodes()` | `() → JsValue` | Identify critical/articulation nodes |
-
-### 2. Clustering (`clustering.rs`)
-High-performance point clustering for map marker visualization.
-- **Features**: Grid-based algorithm, Web Mercator projection, zoom-level-aware.
-
-| Export | Signature | Description |
-|--------|-----------|-------------|
-| `Clusterer::new()` | `() → Clusterer` | Create empty clusterer |
-| `Clusterer::load_points()` | `(points: JsValue) → Result` | Load lat/lng points |
-| `Clusterer::get_clusters()` | `(min_lng, min_lat, max_lng, max_lat, zoom) → Vec<Cluster>` | Get clusters within bounding box at zoom level |
-
-### 3. Simulation (`simulation.rs`)
+### 1. Simulation (`simulation.rs`)
 Time-based energy generation and consumption simulation.
 - **Features**: Realistic fluctuation models, day/night cycles for solar/consumption, random status changes.
 
@@ -57,7 +36,7 @@ Time-based energy generation and consumption simulation.
 | `Simulation::get_nodes()` | `() → JsValue` | Get current node states |
 | `Simulation::get_flows()` | `() → JsValue` | Get current flow states |
 
-### 4. Order Book (`orderbook.rs`)
+### 2. Order Book (`orderbook.rs`)
 Client-side matching engine for P2P market visualization.
 - **Features**: Price-time priority matching, depth chart data, spread/mid-price calculations.
 
@@ -77,7 +56,7 @@ Client-side matching engine for P2P market visualization.
 | `OrderBook::ask_count()` | `() → usize` | Number of ask orders |
 | `OrderBook::clear()` | `()` | Clear all orders |
 
-### 5. Crypto (`crypto.rs`)
+### 3. Crypto (`crypto.rs`)
 Cryptographic primitives for secure message signing and verification using `sha2` and `hmac` crates.
 - **Features**: SHA-256, double SHA-256, HMAC-SHA256 signing and verification.
 
@@ -88,21 +67,14 @@ Cryptographic primitives for secure message signing and verification using `sha2
 | `crypto_verify()` | `(key: &[u8], message: &[u8], signature_hex: &str) → bool` | Verify HMAC-SHA256 signature |
 | `crypto_msg_hash()` | `(data: &[u8]) → String` | Double SHA-256 (blockchain-style) |
 
-### 6. Bezier (`bezier.rs`)
+### 4. Bezier (`bezier.rs`)
 Quadratic Bezier curve generation for energy flow visualization on maps.
 
 | Export | Signature | Description |
 |--------|-----------|-------------|
 | `calculate_bezier()` | `(x1, y1, x2, y2, curve_intensity, segments) → Float64Array` | Generate Bezier curve points as flat `[x, y, x, y, ...]` buffer |
 
-### 7. Options (`options.rs`)
-Black-Scholes options pricing with full Greeks calculation for energy derivatives.
-
-| Export | Signature | Description |
-|--------|-----------|-------------|
-| `calculate_black_scholes()` | `(s, k, t, r, v) → OptionResult` | Returns call/put prices, delta, gamma, vega, theta, rho |
-
-### 8. Auction (`auction.rs`)
+### 5. Auction (`auction.rs`)
 Uniform clearing price auction simulator for energy markets (Market Clearing Price calculation).
 
 | Export | Signature | Description |
@@ -112,7 +84,7 @@ Uniform clearing price auction simulator for energy markets (Market Clearing Pri
 | `AuctionSimulator::clear()` | `()` | Remove all orders |
 | `AuctionSimulator::calculate_clearing_price()` | `() → [clearing_price, clearing_volume]` | Compute uniform Market Clearing Price |
 
-### 9. ZK — Zero-Knowledge Proofs (`zk.rs`)
+### 6. ZK — Zero-Knowledge Proofs (`zk.rs`)
 ElGamal keypairs, Pedersen commitments, and range proofs for confidential energy trading. Built on `solana-zk-token-sdk`.
 
 | Export | Signature | Description |

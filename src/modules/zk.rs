@@ -52,10 +52,17 @@ impl WasmElGamalKeypair {
     }
 
     #[wasm_bindgen(js_name = "fromSecret")]
-    pub fn from_secret(_secret: &[u8]) -> Result<WasmElGamalKeypair, JsValue> {
-        // Recovery from secret is tricky in 1.18.26 without SeedDerivable.
-        // For testing, just return a new one.
-        Ok(Self { inner: ElGamalKeypair::new_rand() })
+    pub fn from_secret(secret_bytes: &[u8]) -> Result<WasmElGamalKeypair, JsValue> {
+        if secret_bytes.len() != 32 {
+            return Err(JsValue::from_str("Secret key must be 32 bytes"));
+        }
+        
+        let keypair = solana_zk_token_sdk::encryption::elgamal::ElGamalKeypair::try_from(secret_bytes)
+            .map_err(|_| JsValue::from_str("Invalid secret key bytes"))?;
+            
+        Ok(Self { 
+            inner: keypair
+        })
     }
 
     pub fn pubkey(&self) -> Vec<u8> {
@@ -69,6 +76,19 @@ impl WasmElGamalKeypair {
         let bytes: [u8; 32] = unsafe { std::mem::transmute_copy(secret) };
         bytes.to_vec()
     }
+
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<u64, JsValue> {
+        if ciphertext.len() != 64 {
+            return Err(JsValue::from_str("Ciphertext must be 64 bytes"));
+        }
+        let pod_ct: pod::ElGamalCiphertext = bytemuck::pod_read_unaligned(ciphertext);
+        let ct = solana_zk_token_sdk::encryption::elgamal::ElGamalCiphertext::try_from(pod_ct)
+            .map_err(|_| JsValue::from_str("Invalid ciphertext format"))?;
+        
+        self.inner.secret().decrypt(&ct).decode_u32()
+            .map(|v| v as u64)
+            .ok_or_else(|| JsValue::from_str("Decryption failed"))
+    }
 }
 
 /// Create a Pedersen commitment with a specific blinding factor
@@ -78,7 +98,7 @@ pub fn create_commitment(value: u64, blinding: &[u8]) -> Result<JsValue, JsValue
         return Err(JsValue::from_str("Blinding factor must be 32 bytes"));
     }
     
-    let opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(blinding)
+    let opening = PedersenOpening::from_bytes(blinding)
         .ok_or_else(|| JsValue::from_str("Invalid blinding factor"))?;
 
     // Use a valid random public key for commitment extraction
@@ -89,7 +109,7 @@ pub fn create_commitment(value: u64, blinding: &[u8]) -> Result<JsValue, JsValue
     let mut commitment_bytes = [0u8; 32];
     commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
     
-    let _commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&commitment_bytes)
+    let _commitment = PedersenCommitment::from_bytes(&commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
 
     let result = WasmCommitment {
@@ -106,7 +126,7 @@ pub fn create_range_proof(amount: u64, blinding: &[u8]) -> Result<JsValue, JsVal
         return Err(JsValue::from_str("Blinding factor must be 32 bytes"));
     }
 
-    let opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(blinding)
+    let opening = PedersenOpening::from_bytes(blinding)
         .ok_or_else(|| JsValue::from_str("Invalid blinding factor"))?;
 
     // Use a valid random public key for commitment extraction
@@ -117,7 +137,7 @@ pub fn create_range_proof(amount: u64, blinding: &[u8]) -> Result<JsValue, JsVal
     let mut commitment_bytes = [0u8; 32];
     commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
 
-    let commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&commitment_bytes)
+    let commitment = PedersenCommitment::from_bytes(&commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
     
     let data = RangeProofU64Data::new(&commitment, amount, &opening)
@@ -146,9 +166,9 @@ pub fn create_transfer_proof(
     }
 
     // Prepare blindings
-    let s_opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(sender_blinding)
+    let s_opening = PedersenOpening::from_bytes(sender_blinding)
         .ok_or_else(|| JsValue::from_str("Invalid sender blinding factor"))?;
-    let a_opening = solana_zk_token_sdk::encryption::pedersen::PedersenOpening::from_bytes(amount_blinding)
+    let a_opening = PedersenOpening::from_bytes(amount_blinding)
         .ok_or_else(|| JsValue::from_str("Invalid amount blinding factor"))?;
 
     // Use a valid random public key for commitment extraction
@@ -159,7 +179,7 @@ pub fn create_transfer_proof(
     let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(amount, &a_opening));
     let mut a_commitment_bytes = [0u8; 32];
     a_commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
-    let a_commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&a_commitment_bytes)
+    let a_commitment = PedersenCommitment::from_bytes(&a_commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct amount commitment"))?;
 
     // Remaining balance commitment
@@ -167,7 +187,7 @@ pub fn create_transfer_proof(
     let pod_r_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(remaining, &s_opening));
     let mut r_commitment_bytes = [0u8; 32];
     r_commitment_bytes.copy_from_slice(&pod_r_ciphertext.0[..32]);
-    let r_commitment = solana_zk_token_sdk::encryption::pedersen::PedersenCommitment::from_bytes(&r_commitment_bytes)
+    let r_commitment = PedersenCommitment::from_bytes(&r_commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct remaining commitment"))?;
 
     // Generate sub-proofs

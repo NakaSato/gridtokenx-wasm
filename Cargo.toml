@@ -18,7 +18,7 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 curve25519-dalek = { version = "3", features = ["serde"] }
 rand = "0.8"
-solana-zk-token-sdk = "1.18.26"
+solana-zk-token-sdk = "2.3.1"
 bytemuck = { version = "1.16", features = ["derive"] }
 
 [package.metadata.wasm-pack.profile.release]
