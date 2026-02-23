@@ -77,6 +77,19 @@ pub fn crypto_msg_hash(data: &[u8]) -> String {
     hex::encode(hash2)
 }
 
+/// Standardized P2P order message construction and signing
+#[wasm_bindgen]
+pub fn sign_p2p_order(
+    side: &str,
+    amount: &str,
+    price: &str,
+    timestamp: i64,
+    secret_key: &[u8],
+) -> Result<String, JsValue> {
+    let message = format!("{}:{}:{}:{}", side, amount, price, timestamp);
+    hmac_sha256(secret_key, message.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +116,13 @@ mod tests {
         
         assert!(crypto_verify(key, message, &sig));
         assert!(!crypto_verify(key, b"wrong msg", &sig));
+    }
+
+    #[test]
+    fn test_sign_p2p_order() {
+        let key = b"secret";
+        let sig = sign_p2p_order("buy", "100", "4.5", 1625097600000, key).unwrap();
+        let expected_msg = "buy:100:4.5:1625097600000";
+        assert!(crypto_verify(key, expected_msg.as_bytes(), &sig));
     }
 }
