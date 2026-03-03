@@ -29,6 +29,15 @@ pub struct SimulationFlow {
     pub current_power: f64,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GridTotals {
+    pub total_generation: f64,
+    pub total_consumption: f64,
+    pub co2_saved: f64,
+    pub active_meters: u32,
+    pub avg_storage: f64,
+}
+
 #[wasm_bindgen]
 pub struct Simulation {
     nodes: Vec<SimulationNode>,
@@ -113,6 +122,40 @@ impl Simulation {
     /// Returns the current state of all flows
     pub fn get_flows(&self) -> Result<JsValue, JsValue> {
         Ok(serde_wasm_bindgen::to_value(&self.flows)?)
+    }
+
+    /// Calculate aggregate grid totals in WASM
+    pub fn get_grid_totals(&self) -> Result<JsValue, JsValue> {
+        let mut total_gen = 0.0;
+        let mut total_cons = 0.0;
+        let mut active_count = 0;
+        let mut storage_sum = 0.0;
+        let mut storage_count = 0;
+
+        for node in &self.nodes {
+            match node.node_type {
+                0 => total_gen += node.current_value,
+                1 => {
+                    storage_sum += node.current_value;
+                    storage_count += 1;
+                },
+                2 => total_cons += node.current_value,
+                _ => {}
+            }
+            if node.status == 1 {
+                active_count += 1;
+            }
+        }
+
+        let result = GridTotals {
+            total_generation: total_gen,
+            total_consumption: total_cons,
+            co2_saved: total_gen * 0.431,
+            active_meters: active_count,
+            avg_storage: if storage_count > 0 { storage_sum / storage_count as f64 } else { 0.0 },
+        };
+
+        Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 }
 

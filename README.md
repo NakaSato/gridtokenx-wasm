@@ -97,6 +97,25 @@ ElGamal keypairs, Pedersen commitments, and range proofs for confidential energy
 | `create_range_proof()` | `(amount: u64, blinding: &[u8]) → WasmRangeProof` | Range proof for u64 amount |
 | `create_transfer_proof()` | `(amount, sender_balance, sender_blinding, amount_blinding) → WasmTransferProof` | Full transfer proof with balance equality |
 
+### 7. Governance (`governance.rs`)
+Solana governance client with ZK-weighted voting. Replaces the TypeScript `GovernanceProvider` with high-performance WASM operations.
+
+| Export | Signature | Description |
+|--------|-----------|-------------|
+| `GovernanceClient::new()` | `(rpc_url, program_id) → GovernanceClient` | Create governance client for Solana |
+| `GovernanceClient::connect()` | `() → bool` | Initialize blockchain connection |
+| `GovernanceClient::is_connected` | getter `bool` | Connection status |
+| `GovernanceClient::proposals` | getter `JsValue` | Get proposals as JSON array |
+| `GovernanceClient::poa_config` | getter `JsValue` | Get PoA config as JSON |
+| `GovernanceClient::fetch_poa_config()` | `() → JsValue` | Fetch PoA config from blockchain |
+| `GovernanceClient::vote_private()` | `(proposal_id, support, balance, root_seed) → String` | Cast ZK-weighted vote |
+| `GovernanceClient::create_proposal()` | `(title, description) → String` | Create new proposal |
+| `GovernanceClient::get_state()` | `() → JsValue` | Full governance state |
+| `decode_fixed_string()` | `(bytes, len) → String` | Decode fixed-size byte array |
+| `compute_poa_config_pda()` | `(program_id) → String` | Compute PoA config PDA |
+| `generate_zk_vote_proof()` | `(balance, root_seed, proposal_id) → String` | Generate ZK proof for voting |
+| `verify_zk_vote_proof()` | `(proof, proposal_id) → bool` | Verify ZK vote proof |
+
 ### Global
 
 | Export | Signature | Description |

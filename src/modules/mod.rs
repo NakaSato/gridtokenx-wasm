@@ -1,6 +1,11 @@
+pub mod aggregation;
 pub mod auction;
 pub mod bezier;
+pub mod clustering;
 pub mod crypto;
+pub mod governance;
 pub mod orderbook;
+pub mod portfolio;
+pub mod pricing;
 pub mod simulation;
 pub mod zk;
