@@ -31,44 +31,65 @@ impl AuctionSimulator {
         self.orders.clear();
     }
 
-    /// Calculate Uniform Clearing Price (MCP)
+    /// Calculate Uniform Clearing Price (MCP) - Optimized to O(n log n)
     /// Returns [clearing_price, clearing_volume]
     pub fn calculate_clearing_price(&self) -> Vec<f64> {
         let mut bids: Vec<&AuctionOrderWasm> = self.orders.iter().filter(|o| o.is_bid).collect();
         let mut asks: Vec<&AuctionOrderWasm> = self.orders.iter().filter(|o| !o.is_bid).collect();
 
-        // Sort Bids DESC
+        if bids.is_empty() || asks.is_empty() {
+            return vec![0.0, 0.0];
+        }
+
+        // Sort Bids DESC by price
         bids.sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(Ordering::Equal));
-        // Sort Asks ASC
+        // Sort Asks ASC by price
         asks.sort_by(|a, b| a.price.partial_cmp(&b.price).unwrap_or(Ordering::Equal));
 
+        // Build cumulative demand curve (descending from highest bid)
+        let mut cum_demand: Vec<(f64, f64)> = Vec::with_capacity(bids.len()); // (price, cumulative_amount)
+        let mut cum_amount = 0.0;
+        for bid in &bids {
+            cum_amount += bid.amount;
+            cum_demand.push((bid.price, cum_amount));
+        }
+
+        // Build cumulative supply curve (ascending from lowest ask)
+        let mut cum_supply: Vec<(f64, f64)> = Vec::with_capacity(asks.len()); // (price, cumulative_amount)
+        let mut cum_amount = 0.0;
+        for ask in &asks {
+            cum_amount += ask.amount;
+            cum_supply.push((ask.price, cum_amount));
+        }
+
+        // Find maximum intersection using two-pointer technique - O(n)
         let mut clearing_price = 0.0;
         let mut max_volume = 0.0;
+        let mut bid_idx = 0;
+        let mut ask_idx = 0;
 
-        // Collect all unique price points
-        let mut prices: Vec<f64> = self.orders.iter().map(|o| o.price).collect();
-        prices.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-        prices.dedup();
-        
-        for &p in &prices {
-            let supply: f64 = asks.iter()
-                .filter(|o| o.price <= p)
-                .map(|o| o.amount)
-                .sum();
+        while bid_idx < cum_demand.len() && ask_idx < cum_supply.len() {
+            let (bid_price, demand) = cum_demand[bid_idx];
+            let (ask_price, supply) = cum_supply[ask_idx];
+
+            if ask_price <= bid_price {
+                // Potential match at this price level
+                let volume = supply.min(demand);
                 
-            let demand: f64 = bids.iter()
-                .filter(|o| o.price >= p)
-                .map(|o| o.amount)
-                .sum();
+                if volume > max_volume {
+                    max_volume = volume;
+                    // Use midpoint as clearing price
+                    clearing_price = (ask_price + bid_price) / 2.0;
+                } else if (volume - max_volume).abs() < f64::EPSILON && volume > 0.0 {
+                    // Same volume, update to higher price (producer surplus)
+                    clearing_price = (ask_price + bid_price) / 2.0;
+                }
                 
-            let volume = supply.min(demand);
-            
-            if volume > max_volume {
-                max_volume = volume;
-                clearing_price = p;
-            } else if (volume - max_volume).abs() < f64::EPSILON && volume > 0.0 {
-                 // Maximizing producer surplus
-                 clearing_price = p;
+                // Move to next supply level
+                ask_idx += 1;
+            } else {
+                // Price gap, move to lower demand
+                bid_idx += 1;
             }
         }
 
