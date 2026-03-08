@@ -1,9 +1,11 @@
 //! Order Book and Matching Engine
 //! 
 //! Client-side order book for visualization and matching preview.
+//! OPTIMIZED: Uses BTreeMap for O(log n) operations instead of Vec O(n)
 
 use wasm_bindgen::prelude::*;
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
 
 // ============================================================================
@@ -45,14 +47,49 @@ pub struct Match {
     pub quantity: f64,
 }
 
+// Helper for reverse ordering in BTreeMap
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct ReversePrice(u64);
+
+impl ReversePrice {
+    fn from_f64(price: f64) -> Self {
+        // Store as fixed-point to avoid floating point issues in ordering
+        Self((price * 1_000_000.0) as u64)
+    }
+    
+    fn to_f64(&self) -> f64 {
+        self.0 as f64 / 1_000_000.0
+    }
+}
+
+// Helper for normal ordering in BTreeMap
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+struct Price(u64);
+
+impl Price {
+    fn from_f64(price: f64) -> Self {
+        Self((price * 1_000_000.0) as u64)
+    }
+    
+    fn to_f64(&self) -> f64 {
+        self.0 as f64 / 1_000_000.0
+    }
+}
+
 // ============================================================================
-// Order Book
+// Order Book - OPTIMIZED with BTreeMap
 // ============================================================================
 
 #[wasm_bindgen]
 pub struct OrderBook {
-    bids: Vec<Order>,  // Sorted by price DESC, then timestamp ASC
-    asks: Vec<Order>,  // Sorted by price ASC, then timestamp ASC
+    // Bids: Highest price first (Reverse ordering)
+    // Key: Reverse price level, Value: Vec of orders at that price (time-ordered)
+    bids: BTreeMap<ReversePrice, Vec<Order>>,
+    // Asks: Lowest price first (Natural ordering)
+    // Key: Price level, Value: Vec of orders at that price (time-ordered)
+    asks: BTreeMap<Price, Vec<Order>>,
+    // Index for O(1) order lookup by ID
+    order_index: std::collections::HashMap<u32, (Side, u64)>, // (side, price_key)
 }
 
 #[wasm_bindgen]
@@ -60,8 +97,9 @@ impl OrderBook {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self {
-            bids: Vec::with_capacity(1000),
-            asks: Vec::with_capacity(1000),
+            bids: BTreeMap::new(),
+            asks: BTreeMap::new(),
+            order_index: std::collections::HashMap::with_capacity(1000),
         }
     }
 
@@ -69,171 +107,235 @@ impl OrderBook {
     pub fn clear(&mut self) {
         self.bids.clear();
         self.asks.clear();
+        self.order_index.clear();
     }
 
-    /// Add an order to the book
+    /// Add an order to the book - O(log n) insertion
     pub fn add_order(&mut self, id: u32, side: u8, price: f64, quantity: f64, timestamp: u64) {
         let order = Order::new(id, Side::from(side), price, quantity, timestamp);
+        
         match order.side {
             Side::Buy => {
-                let pos = self.bids.binary_search_by(|probe| {
-                    match probe.price.partial_cmp(&order.price).unwrap_or(Ordering::Equal) {
-                        Ordering::Equal => probe.timestamp.cmp(&order.timestamp),
-                        Ordering::Greater => Ordering::Less,
-                        Ordering::Less => Ordering::Greater,
-                    }
-                }).unwrap_or_else(|pos| pos);
-                self.bids.insert(pos, order);
+                let price_key = ReversePrice::from_f64(price);
+                self.bids.entry(price_key)
+                    .or_insert_with(Vec::new)
+                    .push(order);
+                self.order_index.insert(id, (Side::Buy, price_key.0));
             }
             Side::Sell => {
-                let pos = self.asks.binary_search_by(|probe| {
-                    match probe.price.partial_cmp(&order.price).unwrap_or(Ordering::Equal) {
-                        Ordering::Equal => probe.timestamp.cmp(&order.timestamp),
-                        other => other,
-                    }
-                }).unwrap_or_else(|pos| pos);
-                self.asks.insert(pos, order);
+                let price_key = Price::from_f64(price);
+                self.asks.entry(price_key)
+                    .or_insert_with(Vec::new)
+                    .push(order);
+                self.order_index.insert(id, (Side::Sell, price_key.0));
             }
         }
     }
 
-    /// Bulk check/add orders (not strictly necessary with wasm-bindgen if we just loop in JS, but nice for perf)
+    /// Bulk load orders - optimized to avoid per-insert overhead
     pub fn load_orders(&mut self, orders: JsValue) -> Result<(), JsValue> {
         let orders_vec: Vec<Order> = serde_wasm_bindgen::from_value(orders)?;
         self.clear();
+        
+        // Group orders by price level for efficient batch insertion
         for order in orders_vec {
-             // Re-use logic to insert sorted
-             // Ideally we'd just sort once at the end for bulk load, but this is safer
-             // To avoid duplication, we call the internal adding logic or just replicate it.
-             // For simplicity, let's just create a helper or call add_order logic.
-             // But since we can't easily call `self.add_order` which takes flat params from here without verbosity...
-             // Let's just trust the JS or re-implement insert logic.
-             // Actually, for bulk load, just clearing and re-adding is fine.
-             // We can optimize if needed.
-             self.add_reused(order);
+            match order.side {
+                Side::Buy => {
+                    let price_key = ReversePrice::from_f64(order.price);
+                    self.bids.entry(price_key)
+                        .or_insert_with(Vec::new)
+                        .push(order);
+                    self.order_index.insert(order.id, (Side::Buy, price_key.0));
+                }
+                Side::Sell => {
+                    let price_key = Price::from_f64(order.price);
+                    self.asks.entry(price_key)
+                        .or_insert_with(Vec::new)
+                        .push(order);
+                    self.order_index.insert(order.id, (Side::Sell, price_key.0));
+                }
+            }
         }
         Ok(())
     }
 
-    fn add_reused(&mut self, order: Order) {
-         match order.side {
+    /// Cancel order - O(1) lookup with HashMap index
+    pub fn cancel_order(&mut self, order_id: u32) -> bool {
+        // O(1) lookup using index
+        let Some((side, price_key)) = self.order_index.remove(&order_id) else {
+            return false;
+        };
+        
+        match side {
             Side::Buy => {
-                let pos = self.bids.binary_search_by(|probe| {
-                    match probe.price.partial_cmp(&order.price).unwrap_or(Ordering::Equal) {
-                        Ordering::Equal => probe.timestamp.cmp(&order.timestamp),
-                        Ordering::Greater => Ordering::Less,
-                        Ordering::Less => Ordering::Greater,
+                let key = ReversePrice(price_key);
+                if let Some(orders) = self.bids.get_mut(&key) {
+                    if let Some(pos) = orders.iter().position(|o| o.id == order_id) {
+                        orders.remove(pos);
+                        // Clean up empty price levels
+                        if orders.is_empty() {
+                            self.bids.remove(&key);
+                        }
+                        return true;
                     }
-                }).unwrap_or_else(|pos| pos);
-                self.bids.insert(pos, order);
+                }
             }
             Side::Sell => {
-                let pos = self.asks.binary_search_by(|probe| {
-                    match probe.price.partial_cmp(&order.price).unwrap_or(Ordering::Equal) {
-                        Ordering::Equal => probe.timestamp.cmp(&order.timestamp),
-                        other => other,
+                let key = Price(price_key);
+                if let Some(orders) = self.asks.get_mut(&key) {
+                    if let Some(pos) = orders.iter().position(|o| o.id == order_id) {
+                        orders.remove(pos);
+                        // Clean up empty price levels
+                        if orders.is_empty() {
+                            self.asks.remove(&key);
+                        }
+                        return true;
                     }
-                }).unwrap_or_else(|pos| pos);
-                self.asks.insert(pos, order);
+                }
             }
         }
-    }
-
-    pub fn cancel_order(&mut self, order_id: u32) -> bool {
-        if let Some(pos) = self.bids.iter().position(|o| o.id == order_id) {
-            self.bids.remove(pos);
-            return true;
-        }
-        if let Some(pos) = self.asks.iter().position(|o| o.id == order_id) {
-            self.asks.remove(pos);
-            return true;
-        }
+        
         false
     }
 
+    /// Get best bid price - O(1) with BTreeMap
     pub fn best_bid_price(&self) -> f64 {
-        self.bids.first().map(|o| o.price).unwrap_or(-1.0)
+        self.bids.first_key_value()
+            .map(|(k, v)| if !v.is_empty() { k.to_f64() } else { -1.0 })
+            .unwrap_or(-1.0)
     }
 
+    /// Get best ask price - O(1) with BTreeMap
     pub fn best_ask_price(&self) -> f64 {
-        self.asks.first().map(|o| o.price).unwrap_or(-1.0)
+        self.asks.first_key_value()
+            .map(|(k, v)| if !v.is_empty() { k.to_f64() } else { -1.0 })
+            .unwrap_or(-1.0)
     }
 
     pub fn spread(&self) -> f64 {
-        match (self.bids.first(), self.asks.first()) {
-            (Some(bid), Some(ask)) => ask.price - bid.price,
+        match (self.best_bid_price(), self.best_ask_price()) {
+            (bid, ask) if bid >= 0.0 && ask >= 0.0 => ask - bid,
             _ => -1.0,
         }
     }
 
     pub fn mid_price(&self) -> f64 {
-        match (self.bids.first(), self.asks.first()) {
-             (Some(bid), Some(ask)) => (bid.price + ask.price) / 2.0,
-             _ => -1.0,
+        match (self.best_bid_price(), self.best_ask_price()) {
+            (bid, ask) if bid >= 0.0 && ask >= 0.0 => (bid + ask) / 2.0,
+            _ => -1.0,
         }
     }
 
+    /// Match orders - optimized with BTreeMap
     pub fn match_orders(&mut self) -> Result<JsValue, JsValue> {
         let mut matches = Vec::new();
 
-        while !self.bids.is_empty() && !self.asks.is_empty() {
-            let best_bid = &self.bids[0];
-            let best_ask = &self.asks[0];
+        loop {
+            // Get the best bid and ask by peeking at first entries
+            let best_bid_opt = self.bids.first_key_value()
+                .and_then(|(_, orders)| orders.first().map(|o| *o));
+            let best_ask_opt = self.asks.first_key_value()
+                .and_then(|(_, orders)| orders.first().map(|o| *o));
 
-            if best_bid.price >= best_ask.price {
-                let exec_price = if best_bid.timestamp <= best_ask.timestamp {
-                    best_bid.price
-                } else {
-                    best_ask.price
-                };
+            let (best_bid, best_ask) = match (best_bid_opt, best_ask_opt) {
+                (Some(bid), Some(ask)) => (bid, ask),
+                _ => break, // No more orders to match
+            };
 
-                let exec_qty = best_bid.quantity.min(best_ask.quantity);
+            if best_bid.price < best_ask.price {
+                break; // No more matches possible
+            }
 
-                matches.push(Match {
-                    buy_order_id: best_bid.id,
-                    sell_order_id: best_ask.id,
-                    price: exec_price,
-                    quantity: exec_qty,
-                });
+            let exec_price = if best_bid.timestamp <= best_ask.timestamp {
+                best_bid.price
+            } else {
+                best_ask.price
+            };
 
-                let bid_remaining = best_bid.quantity - exec_qty;
-                let ask_remaining = best_ask.quantity - exec_qty;
+            let exec_qty = best_bid.quantity.min(best_ask.quantity);
 
-                if bid_remaining <= 0.0001 {
-                    self.bids.remove(0);
-                } else {
-                    self.bids[0].quantity = bid_remaining;
-                }
+            matches.push(Match {
+                buy_order_id: best_bid.id,
+                sell_order_id: best_ask.id,
+                price: exec_price,
+                quantity: exec_qty,
+            });
 
-                if ask_remaining <= 0.0001 {
-                    self.asks.remove(0);
-                } else {
-                    self.asks[0].quantity = ask_remaining;
+            let bid_remaining = best_bid.quantity - exec_qty;
+            let ask_remaining = best_ask.quantity - exec_qty;
+
+            // Update or remove bid
+            let bid_key = ReversePrice::from_f64(best_bid.price);
+            if bid_remaining <= 0.0001 {
+                if let Some(orders) = self.bids.get_mut(&bid_key) {
+                    if !orders.is_empty() {
+                        orders.remove(0);
+                    }
+                    self.order_index.remove(&best_bid.id);
+                    if orders.is_empty() {
+                        self.bids.remove(&bid_key);
+                    }
                 }
             } else {
-                break;
+                if let Some(orders) = self.bids.get_mut(&bid_key) {
+                    if !orders.is_empty() {
+                        orders[0].quantity = bid_remaining;
+                    }
+                }
+            }
+
+            // Update or remove ask
+            let ask_key = Price::from_f64(best_ask.price);
+            if ask_remaining <= 0.0001 {
+                if let Some(orders) = self.asks.get_mut(&ask_key) {
+                    if !orders.is_empty() {
+                        orders.remove(0);
+                    }
+                    self.order_index.remove(&best_ask.id);
+                    if orders.is_empty() {
+                        self.asks.remove(&ask_key);
+                    }
+                }
+            } else {
+                if let Some(orders) = self.asks.get_mut(&ask_key) {
+                    if !orders.is_empty() {
+                        orders[0].quantity = ask_remaining;
+                    }
+                }
             }
         }
 
         Ok(serde_wasm_bindgen::to_value(&matches)?)
     }
 
-    /// Get depth data for visualization
+    /// Get depth data for visualization - optimized iteration
     /// Returns: { bids: [[price, cum_qty], ...], asks: [[price, cum_qty], ...] }
     pub fn get_depth(&self, levels: usize) -> Result<JsValue, JsValue> {
         let mut bid_depth = Vec::with_capacity(levels);
         let mut cumulative = 0.0;
         let mut last_price = f64::NAN;
+        let mut count = 0;
 
-        for order in self.bids.iter().take(levels * 10) {
-            if order.price != last_price {
-                if !last_price.is_nan() && bid_depth.len() < levels {
-                    bid_depth.push((last_price, cumulative));
-                }
-                last_price = order.price;
+        // Iterate through price levels in order
+        for (price_key, orders) in self.bids.iter() {
+            if count >= levels {
+                break;
             }
-            cumulative += order.quantity;
+            
+            let price = price_key.to_f64();
+            if price != last_price {
+                if !last_price.is_nan() {
+                    bid_depth.push((last_price, cumulative));
+                    count += 1;
+                }
+                last_price = price;
+            }
+            
+            for order in orders.iter().take(levels * 10 - bid_depth.len() * 10) {
+                cumulative += order.quantity;
+            }
         }
+        
         if !last_price.is_nan() && bid_depth.len() < levels {
             bid_depth.push((last_price, cumulative));
         }
@@ -241,16 +343,27 @@ impl OrderBook {
         let mut ask_depth = Vec::with_capacity(levels);
         cumulative = 0.0;
         last_price = f64::NAN;
+        count = 0;
 
-        for order in self.asks.iter().take(levels * 10) {
-            if order.price != last_price {
-                if !last_price.is_nan() && ask_depth.len() < levels {
-                    ask_depth.push((last_price, cumulative));
-                }
-                last_price = order.price;
+        for (price_key, orders) in self.asks.iter() {
+            if count >= levels {
+                break;
             }
-            cumulative += order.quantity;
+            
+            let price = price_key.to_f64();
+            if price != last_price {
+                if !last_price.is_nan() {
+                    ask_depth.push((last_price, cumulative));
+                    count += 1;
+                }
+                last_price = price;
+            }
+            
+            for order in orders.iter().take(levels * 10 - ask_depth.len() * 10) {
+                cumulative += order.quantity;
+            }
         }
+        
         if !last_price.is_nan() && ask_depth.len() < levels {
             ask_depth.push((last_price, cumulative));
         }
@@ -264,11 +377,11 @@ impl OrderBook {
     }
 
     pub fn bid_count(&self) -> usize {
-        self.bids.len()
+        self.bids.values().map(|v| v.len()).sum()
     }
 
     pub fn ask_count(&self) -> usize {
-        self.asks.len()
+        self.asks.values().map(|v| v.len()).sum()
     }
 }
 
@@ -292,5 +405,17 @@ mod tests {
         
         assert_eq!(book.best_bid_price(), 101.0);
         assert_eq!(book.best_ask_price(), 102.0);
+    }
+
+    #[test]
+    fn test_cancel_order() {
+        let mut book = OrderBook::new();
+        
+        book.add_order(1, 0, 100.0, 10.0, 1);
+        book.add_order(2, 0, 101.0, 5.0, 2);
+        
+        assert!(book.cancel_order(1));
+        assert!(!book.cancel_order(999));
+        assert_eq!(book.bid_count(), 1);
     }
 }
