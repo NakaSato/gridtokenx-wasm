@@ -1,13 +1,15 @@
 //! Bezier Curve Module
-//! 
+//!
 //! Quadratic Bezier curve generation for energy flow visualization.
 
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn calculate_bezier(
-    x1: f64, y1: f64,
-    x2: f64, y2: f64,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
     curve_intensity: f64,
     segments: usize,
 ) -> Vec<f64> {

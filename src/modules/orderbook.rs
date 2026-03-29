@@ -1,12 +1,11 @@
 //! Order Book and Matching Engine
-//! 
+//!
 //! Client-side order book for visualization and matching preview.
 //! OPTIMIZED: Uses BTreeMap for O(log n) operations instead of Vec O(n)
 
-use wasm_bindgen::prelude::*;
-use std::cmp::Ordering;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use serde::{Serialize, Deserialize};
+use wasm_bindgen::prelude::*;
 
 // ============================================================================
 // Types
@@ -20,7 +19,11 @@ pub enum Side {
 
 impl From<u8> for Side {
     fn from(v: u8) -> Self {
-        if v == 0 { Side::Buy } else { Side::Sell }
+        if v == 0 {
+            Side::Buy
+        } else {
+            Side::Sell
+        }
     }
 }
 
@@ -35,7 +38,13 @@ pub struct Order {
 
 impl Order {
     pub fn new(id: u32, side: Side, price: f64, quantity: f64, timestamp: u64) -> Self {
-        Self { id, side, price, quantity, timestamp }
+        Self {
+            id,
+            side,
+            price,
+            quantity,
+            timestamp,
+        }
     }
 }
 
@@ -56,7 +65,7 @@ impl ReversePrice {
         // Store as fixed-point to avoid floating point issues in ordering
         Self((price * 1_000_000.0) as u64)
     }
-    
+
     fn to_f64(&self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
@@ -70,7 +79,7 @@ impl Price {
     fn from_f64(price: f64) -> Self {
         Self((price * 1_000_000.0) as u64)
     }
-    
+
     fn to_f64(&self) -> f64 {
         self.0 as f64 / 1_000_000.0
     }
@@ -113,18 +122,20 @@ impl OrderBook {
     /// Add an order to the book - O(log n) insertion
     pub fn add_order(&mut self, id: u32, side: u8, price: f64, quantity: f64, timestamp: u64) {
         let order = Order::new(id, Side::from(side), price, quantity, timestamp);
-        
+
         match order.side {
             Side::Buy => {
                 let price_key = ReversePrice::from_f64(price);
-                self.bids.entry(price_key)
+                self.bids
+                    .entry(price_key)
                     .or_insert_with(Vec::new)
                     .push(order);
                 self.order_index.insert(id, (Side::Buy, price_key.0));
             }
             Side::Sell => {
                 let price_key = Price::from_f64(price);
-                self.asks.entry(price_key)
+                self.asks
+                    .entry(price_key)
                     .or_insert_with(Vec::new)
                     .push(order);
                 self.order_index.insert(id, (Side::Sell, price_key.0));
@@ -136,20 +147,22 @@ impl OrderBook {
     pub fn load_orders(&mut self, orders: JsValue) -> Result<(), JsValue> {
         let orders_vec: Vec<Order> = serde_wasm_bindgen::from_value(orders)?;
         self.clear();
-        
+
         // Group orders by price level for efficient batch insertion
         for order in orders_vec {
             match order.side {
                 Side::Buy => {
                     let price_key = ReversePrice::from_f64(order.price);
-                    self.bids.entry(price_key)
+                    self.bids
+                        .entry(price_key)
                         .or_insert_with(Vec::new)
                         .push(order);
                     self.order_index.insert(order.id, (Side::Buy, price_key.0));
                 }
                 Side::Sell => {
                     let price_key = Price::from_f64(order.price);
-                    self.asks.entry(price_key)
+                    self.asks
+                        .entry(price_key)
                         .or_insert_with(Vec::new)
                         .push(order);
                     self.order_index.insert(order.id, (Side::Sell, price_key.0));
@@ -165,7 +178,7 @@ impl OrderBook {
         let Some((side, price_key)) = self.order_index.remove(&order_id) else {
             return false;
         };
-        
+
         match side {
             Side::Buy => {
                 let key = ReversePrice(price_key);
@@ -194,20 +207,22 @@ impl OrderBook {
                 }
             }
         }
-        
+
         false
     }
 
     /// Get best bid price - O(1) with BTreeMap
     pub fn best_bid_price(&self) -> f64 {
-        self.bids.first_key_value()
+        self.bids
+            .first_key_value()
             .map(|(k, v)| if !v.is_empty() { k.to_f64() } else { -1.0 })
             .unwrap_or(-1.0)
     }
 
     /// Get best ask price - O(1) with BTreeMap
     pub fn best_ask_price(&self) -> f64 {
-        self.asks.first_key_value()
+        self.asks
+            .first_key_value()
             .map(|(k, v)| if !v.is_empty() { k.to_f64() } else { -1.0 })
             .unwrap_or(-1.0)
     }
@@ -232,9 +247,13 @@ impl OrderBook {
 
         loop {
             // Get the best bid and ask by peeking at first entries
-            let best_bid_opt = self.bids.first_key_value()
+            let best_bid_opt = self
+                .bids
+                .first_key_value()
                 .and_then(|(_, orders)| orders.first().map(|o| *o));
-            let best_ask_opt = self.asks.first_key_value()
+            let best_ask_opt = self
+                .asks
+                .first_key_value()
                 .and_then(|(_, orders)| orders.first().map(|o| *o));
 
             let (best_bid, best_ask) = match (best_bid_opt, best_ask_opt) {
@@ -321,7 +340,7 @@ impl OrderBook {
             if count >= levels {
                 break;
             }
-            
+
             let price = price_key.to_f64();
             if price != last_price {
                 if !last_price.is_nan() {
@@ -330,12 +349,12 @@ impl OrderBook {
                 }
                 last_price = price;
             }
-            
+
             for order in orders.iter().take(levels * 10 - bid_depth.len() * 10) {
                 cumulative += order.quantity;
             }
         }
-        
+
         if !last_price.is_nan() && bid_depth.len() < levels {
             bid_depth.push((last_price, cumulative));
         }
@@ -349,7 +368,7 @@ impl OrderBook {
             if count >= levels {
                 break;
             }
-            
+
             let price = price_key.to_f64();
             if price != last_price {
                 if !last_price.is_nan() {
@@ -358,12 +377,12 @@ impl OrderBook {
                 }
                 last_price = price;
             }
-            
+
             for order in orders.iter().take(levels * 10 - ask_depth.len() * 10) {
                 cumulative += order.quantity;
             }
         }
-        
+
         if !last_price.is_nan() && ask_depth.len() < levels {
             ask_depth.push((last_price, cumulative));
         }
@@ -398,11 +417,11 @@ mod tests {
     #[test]
     fn test_order_insertion() {
         let mut book = OrderBook::new();
-        
+
         book.add_order(1, 0, 100.0, 10.0, 1);
         book.add_order(2, 0, 101.0, 5.0, 2);
         book.add_order(3, 1, 102.0, 8.0, 3);
-        
+
         assert_eq!(book.best_bid_price(), 101.0);
         assert_eq!(book.best_ask_price(), 102.0);
     }
@@ -410,10 +429,10 @@ mod tests {
     #[test]
     fn test_cancel_order() {
         let mut book = OrderBook::new();
-        
+
         book.add_order(1, 0, 100.0, 10.0, 1);
         book.add_order(2, 0, 101.0, 5.0, 2);
-        
+
         assert!(book.cancel_order(1));
         assert!(!book.cancel_order(999));
         assert_eq!(book.bid_count(), 1);

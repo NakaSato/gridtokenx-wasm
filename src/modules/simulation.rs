@@ -1,10 +1,10 @@
 //! Energy Flow Simulation Module
-//! 
+//!
 //! Time-based simulation of energy nodes and power flows.
 
-use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
-use serde::{Serialize, Deserialize};
+use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SimulationNode {
@@ -56,10 +56,6 @@ impl Simulation {
         }
     }
 
-
-
-
-
     pub fn set_nodes(&mut self, nodes: JsValue) -> Result<(), JsValue> {
         let nodes_vec: Vec<SimulationNode> = serde_wasm_bindgen::from_value(nodes)?;
         self.nodes = nodes_vec;
@@ -110,7 +106,7 @@ impl Simulation {
             let new_power = fluctuate(base, 12.0, &mut rand_float).max(50.0);
             flow.current_power = new_power;
         }
-        
+
         self.rng_state = rng_state;
     }
 
@@ -138,7 +134,7 @@ impl Simulation {
                 1 => {
                     storage_sum += node.current_value;
                     storage_count += 1;
-                },
+                }
                 2 => total_cons += node.current_value,
                 _ => {}
             }
@@ -152,7 +148,11 @@ impl Simulation {
             total_consumption: total_cons,
             co2_saved: total_gen * 0.431,
             active_meters: active_count,
-            avg_storage: if storage_count > 0 { storage_sum / storage_count as f64 } else { 0.0 },
+            avg_storage: if storage_count > 0 {
+                storage_sum / storage_count as f64
+            } else {
+                0.0
+            },
         };
 
         Ok(serde_wasm_bindgen::to_value(&result)?)
@@ -162,32 +162,76 @@ impl Simulation {
 fn get_time_multiplier(hour: f64, node_type: u8) -> f64 {
     let h = hour;
     if node_type == 0 {
-        if h >= 19.0 || h < 6.0 { return 0.05; }
-        if h >= 6.0 && h < 8.0 { return 0.3; }
-        if h >= 8.0 && h < 10.0 { return 0.6; }
-        if h >= 10.0 && h < 12.0 { return 0.85; }
-        if h >= 12.0 && h < 14.0 { return 1.0; }
-        if h >= 14.0 && h < 16.0 { return 0.9; }
-        if h >= 16.0 && h < 18.0 { return 0.6; }
-        if h >= 18.0 && h < 19.0 { return 0.2; }
+        if h >= 19.0 || h < 6.0 {
+            return 0.05;
+        }
+        if h >= 6.0 && h < 8.0 {
+            return 0.3;
+        }
+        if h >= 8.0 && h < 10.0 {
+            return 0.6;
+        }
+        if h >= 10.0 && h < 12.0 {
+            return 0.85;
+        }
+        if h >= 12.0 && h < 14.0 {
+            return 1.0;
+        }
+        if h >= 14.0 && h < 16.0 {
+            return 0.9;
+        }
+        if h >= 16.0 && h < 18.0 {
+            return 0.6;
+        }
+        if h >= 18.0 && h < 19.0 {
+            return 0.2;
+        }
         return 0.5;
     } else if node_type == 2 {
-        if h >= 0.0 && h < 6.0 { return 0.2; }
-        if h >= 6.0 && h < 8.0 { return 0.5; }
-        if h >= 8.0 && h < 10.0 { return 0.9; }
-        if h >= 10.0 && h < 12.0 { return 0.8; }
-        if h >= 12.0 && h < 14.0 { return 0.6; }
-        if h >= 14.0 && h < 17.0 { return 0.85; }
-        if h >= 17.0 && h < 20.0 { return 1.0; }
-        if h >= 20.0 && h < 22.0 { return 0.7; }
-        if h >= 22.0 { return 0.3; }
+        if h >= 0.0 && h < 6.0 {
+            return 0.2;
+        }
+        if h >= 6.0 && h < 8.0 {
+            return 0.5;
+        }
+        if h >= 8.0 && h < 10.0 {
+            return 0.9;
+        }
+        if h >= 10.0 && h < 12.0 {
+            return 0.8;
+        }
+        if h >= 12.0 && h < 14.0 {
+            return 0.6;
+        }
+        if h >= 14.0 && h < 17.0 {
+            return 0.85;
+        }
+        if h >= 17.0 && h < 20.0 {
+            return 1.0;
+        }
+        if h >= 20.0 && h < 22.0 {
+            return 0.7;
+        }
+        if h >= 22.0 {
+            return 0.3;
+        }
         return 0.5;
     } else if node_type == 1 {
-        if h >= 19.0 || h < 6.0 { return 0.4; }
-        if h >= 6.0 && h < 10.0 { return 0.5; }
-        if h >= 10.0 && h < 14.0 { return 0.85; }
-        if h >= 14.0 && h < 17.0 { return 0.95; }
-        if h >= 17.0 && h < 19.0 { return 0.7; }
+        if h >= 19.0 || h < 6.0 {
+            return 0.4;
+        }
+        if h >= 6.0 && h < 10.0 {
+            return 0.5;
+        }
+        if h >= 10.0 && h < 14.0 {
+            return 0.85;
+        }
+        if h >= 14.0 && h < 17.0 {
+            return 0.95;
+        }
+        if h >= 17.0 && h < 19.0 {
+            return 0.7;
+        }
         return 0.6;
     }
     1.0

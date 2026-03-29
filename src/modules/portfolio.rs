@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct PortfolioPosition {
@@ -27,7 +27,7 @@ pub struct PortfolioRisk {
 #[wasm_bindgen]
 pub fn calculate_portfolio_risk(positions_js: JsValue) -> Result<JsValue, JsValue> {
     let positions: Vec<PortfolioPosition> = serde_wasm_bindgen::from_value(positions_js)?;
-    
+
     let mut total_delta = 0.0;
     let mut total_gamma = 0.0;
     let mut total_vega = 0.0;

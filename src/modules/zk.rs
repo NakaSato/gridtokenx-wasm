@@ -1,16 +1,14 @@
-use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
+use bytemuck::bytes_of;
+use serde::{Deserialize, Serialize};
 use solana_zk_token_sdk::{
     encryption::{
         elgamal::ElGamalKeypair,
-        pedersen::{PedersenOpening, PedersenCommitment},
+        pedersen::{PedersenCommitment, PedersenOpening},
     },
-    instruction::{
-        range_proof::{RangeProofU64Data},
-    },
+    instruction::range_proof::RangeProofU64Data,
     zk_token_elgamal::pod,
 };
-use bytemuck::{bytes_of};
+use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct WasmCommitment {
@@ -56,13 +54,12 @@ impl WasmElGamalKeypair {
         if secret_bytes.len() != 32 {
             return Err(JsValue::from_str("Secret key must be 32 bytes"));
         }
-        
-        let keypair = solana_zk_token_sdk::encryption::elgamal::ElGamalKeypair::try_from(secret_bytes)
-            .map_err(|_| JsValue::from_str("Invalid secret key bytes"))?;
-            
-        Ok(Self { 
-            inner: keypair
-        })
+
+        let keypair =
+            solana_zk_token_sdk::encryption::elgamal::ElGamalKeypair::try_from(secret_bytes)
+                .map_err(|_| JsValue::from_str("Invalid secret key bytes"))?;
+
+        Ok(Self { inner: keypair })
     }
 
     pub fn pubkey(&self) -> Vec<u8> {
@@ -84,8 +81,11 @@ impl WasmElGamalKeypair {
         let pod_ct: pod::ElGamalCiphertext = bytemuck::pod_read_unaligned(ciphertext);
         let ct = solana_zk_token_sdk::encryption::elgamal::ElGamalCiphertext::try_from(pod_ct)
             .map_err(|_| JsValue::from_str("Invalid ciphertext format"))?;
-        
-        self.inner.secret().decrypt(&ct).decode_u32()
+
+        self.inner
+            .secret()
+            .decrypt(&ct)
+            .decode_u32()
             .map(|v| v as u64)
             .ok_or_else(|| JsValue::from_str("Decryption failed"))
     }
@@ -97,7 +97,7 @@ pub fn create_commitment(value: u64, blinding: &[u8]) -> Result<JsValue, JsValue
     if blinding.len() != 32 {
         return Err(JsValue::from_str("Blinding factor must be 32 bytes"));
     }
-    
+
     let opening = PedersenOpening::from_bytes(blinding)
         .ok_or_else(|| JsValue::from_str("Invalid blinding factor"))?;
 
@@ -108,7 +108,7 @@ pub fn create_commitment(value: u64, blinding: &[u8]) -> Result<JsValue, JsValue
     let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(value, &opening));
     let mut commitment_bytes = [0u8; 32];
     commitment_bytes.copy_from_slice(&pod_ciphertext.0[..32]);
-    
+
     let _commitment = PedersenCommitment::from_bytes(&commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
 
@@ -139,10 +139,10 @@ pub fn create_range_proof(amount: u64, blinding: &[u8]) -> Result<JsValue, JsVal
 
     let commitment = PedersenCommitment::from_bytes(&commitment_bytes)
         .ok_or_else(|| JsValue::from_str("Failed to reconstruct commitment"))?;
-    
+
     let data = RangeProofU64Data::new(&commitment, amount, &opening)
         .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {:?}", e)))?;
-    
+
     let result = WasmRangeProof {
         proof_data: bytes_of(&data.proof).to_vec(),
         commitment: WasmCommitment {
@@ -174,7 +174,7 @@ pub fn create_transfer_proof(
     // Use a valid random public key for commitment extraction
     let binding = ElGamalKeypair::new_rand();
     let dummy_pk = binding.pubkey();
-    
+
     // Use pod type for robust extraction
     let pod_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(amount, &a_opening));
     let mut a_commitment_bytes = [0u8; 32];
@@ -184,7 +184,8 @@ pub fn create_transfer_proof(
 
     // Remaining balance commitment
     let remaining = sender_balance.saturating_sub(amount);
-    let pod_r_ciphertext = pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(remaining, &s_opening));
+    let pod_r_ciphertext =
+        pod::ElGamalCiphertext::from(dummy_pk.encrypt_with(remaining, &s_opening));
     let mut r_commitment_bytes = [0u8; 32];
     r_commitment_bytes.copy_from_slice(&pod_r_ciphertext.0[..32]);
     let r_commitment = PedersenCommitment::from_bytes(&r_commitment_bytes)
@@ -193,7 +194,7 @@ pub fn create_transfer_proof(
     // Generate sub-proofs
     let a_range_data = RangeProofU64Data::new(&a_commitment, amount, &a_opening)
         .map_err(|e| JsValue::from_str(&format!("Amount range proof failed: {:?}", e)))?;
-    
+
     let r_range_data = RangeProofU64Data::new(&r_commitment, remaining, &s_opening)
         .map_err(|e| JsValue::from_str(&format!("Remaining range proof failed: {:?}", e)))?;
 
@@ -203,11 +204,15 @@ pub fn create_transfer_proof(
         },
         amount_range_proof: WasmRangeProof {
             proof_data: bytes_of(&a_range_data.proof).to_vec(),
-            commitment: WasmCommitment { point: a_commitment_bytes },
+            commitment: WasmCommitment {
+                point: a_commitment_bytes,
+            },
         },
         remaining_range_proof: WasmRangeProof {
             proof_data: bytes_of(&r_range_data.proof).to_vec(),
-            commitment: WasmCommitment { point: r_commitment_bytes },
+            commitment: WasmCommitment {
+                point: r_commitment_bytes,
+            },
         },
         balance_proof: WasmEqualityProof {
             challenge: vec![0u8; 32], // Placeholder for equality proof
@@ -230,10 +235,10 @@ pub fn recover_amount_from_commitment(commitment_js: JsValue, blinding: Vec<u8>)
     // In a real implementation, we would use bulletproofs library to verify
     // For this port, we simulate the high-performance search over small amounts
     // (e.g. 0 to 1,000,000 energy units)
-    
+
     // Placeholder for actual mathematical verification
     // Search logic here...
-    
+
     None
 }
 
@@ -244,10 +249,10 @@ pub fn derive_stealth_key(root_seed: Vec<u8>, index: u32) -> Vec<u8> {
     use sha2::Sha256;
 
     type HmacSha256 = Hmac<Sha256>;
-    
+
     let mut mac = HmacSha256::new_from_slice(&root_seed).expect("HMAC can take key of any size");
     mac.update(b"GridTokenX_Stealth_v1");
     mac.update(&index.to_le_bytes());
-    
+
     mac.finalize().into_bytes().to_vec()
 }

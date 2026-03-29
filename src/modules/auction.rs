@@ -1,7 +1,7 @@
 #![allow(static_mut_refs)]
-use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct AuctionOrderWasm {
@@ -24,7 +24,12 @@ impl AuctionSimulator {
     }
 
     pub fn add_order(&mut self, id: u32, price: f64, amount: f64, is_bid: bool) {
-        self.orders.push(AuctionOrderWasm { id, price, amount, is_bid });
+        self.orders.push(AuctionOrderWasm {
+            id,
+            price,
+            amount,
+            is_bid,
+        });
     }
 
     pub fn clear(&mut self) {
@@ -75,7 +80,7 @@ impl AuctionSimulator {
             if ask_price <= bid_price {
                 // Potential match at this price level
                 let volume = supply.min(demand);
-                
+
                 if volume > max_volume {
                     max_volume = volume;
                     // Use midpoint as clearing price
@@ -84,7 +89,7 @@ impl AuctionSimulator {
                     // Same volume, update to higher price (producer surplus)
                     clearing_price = (ask_price + bid_price) / 2.0;
                 }
-                
+
                 // Move to next supply level
                 ask_idx += 1;
             } else {

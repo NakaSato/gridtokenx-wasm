@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct HourlyDataPoint {
@@ -28,7 +28,7 @@ pub struct RawReading {
 #[wasm_bindgen]
 pub fn aggregate_readings(readings_js: JsValue) -> Result<JsValue, JsValue> {
     let readings: Vec<RawReading> = serde_wasm_bindgen::from_value(readings_js)?;
-    
+
     let mut hourly_buckets: Vec<Vec<f64>> = vec![vec![]; 24];
     let mut total_kwh = 0.0;
 

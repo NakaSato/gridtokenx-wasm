@@ -1,5 +1,5 @@
-use wasm_bindgen::prelude::*;
 use std::f64;
+use wasm_bindgen::prelude::*;
 
 const R: f64 = 0.0;
 const SIGMA: f64 = 0.5;
@@ -30,9 +30,9 @@ pub fn black_scholes(s: f64, k: f64, t: f64, is_call: bool) -> f64 {
     if t <= 0.0 || s <= 0.0 || k <= 0.0 {
         return 0.0;
     }
-    let d1 = ( (s / k).ln() + (R + 0.5 * SIGMA * SIGMA) * t ) / (SIGMA * t.sqrt());
+    let d1 = ((s / k).ln() + (R + 0.5 * SIGMA * SIGMA) * t) / (SIGMA * t.sqrt());
     let d2 = d1 - SIGMA * t.sqrt();
-    
+
     if is_call {
         s * normal_cdf(d1) - k * (-R * t).exp() * normal_cdf(d2)
     } else {
@@ -89,7 +89,8 @@ pub fn theta_calc(s: f64, k: f64, t: f64, is_call: bool) -> f64 {
     }
     let d1 = ((s / k).ln() + (R + SIGMA.powi(2) / 2.0) * t) / (SIGMA * t.sqrt());
     let d2 = d1 - SIGMA * t.sqrt();
-    let theta_value = (-s * normal_pdf(d1) * SIGMA) / (2.0 * t.sqrt()) - R * k * (-R * t).exp() * normal_cdf(if is_call { d2 } else { -d2 });
+    let theta_value = (-s * normal_pdf(d1) * SIGMA) / (2.0 * t.sqrt())
+        - R * k * (-R * t).exp() * normal_cdf(if is_call { d2 } else { -d2 });
     theta_value / 365.0
 }
 
@@ -100,6 +101,11 @@ pub fn rho_calc(s: f64, k: f64, t: f64, is_call: bool) -> f64 {
     }
     let d1 = ((s / k).ln() + (R + SIGMA.powi(2) / 2.0) * t) / (SIGMA * t.sqrt());
     let d2 = d1 - SIGMA * t.sqrt();
-    let val = if is_call { 1.0 } else { -1.0 } * k * t * (-R * t).exp() * normal_cdf(if is_call { d2 } else { -d2 }) * 0.01;
+    let val = if is_call { 1.0 } else { -1.0 }
+        * k
+        * t
+        * (-R * t).exp()
+        * normal_cdf(if is_call { d2 } else { -d2 })
+        * 0.01;
     val
 }

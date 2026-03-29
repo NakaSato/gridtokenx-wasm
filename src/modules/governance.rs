@@ -10,8 +10,8 @@
 //! - Proposal management (create, vote)
 //! - ZK-weighted voting support
 
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use serde::{Serialize, Deserialize};
 
 // ============================================================================
 // Types
@@ -209,7 +209,12 @@ impl GovernanceClient {
         let weight = private_balance;
 
         // Update local proposal state
-        if let Some(proposal) = self.state.proposals.iter_mut().find(|p| p.id == proposal_id) {
+        if let Some(proposal) = self
+            .state
+            .proposals
+            .iter_mut()
+            .find(|p| p.id == proposal_id)
+        {
             if support {
                 proposal.support_weight += weight;
             } else {
@@ -234,7 +239,11 @@ impl GovernanceClient {
     ///
     /// # Returns
     /// The new proposal ID
-    pub fn create_proposal(&mut self, title: String, description: String) -> Result<String, JsValue> {
+    pub fn create_proposal(
+        &mut self,
+        title: String,
+        description: String,
+    ) -> Result<String, JsValue> {
         if !self.state.is_connected {
             return Err(JsValue::from_str("Not connected to blockchain"));
         }
