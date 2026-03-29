@@ -1,7 +1,7 @@
 //! GridTokenX WASM Library
-//! 
+//!
 //! High-performance Rust/WASM modules for the GridTokenX trading platform.
-//! 
+//!
 //! ## Modules
 //!
 //! - **aggregation**: High-performance energy data aggregation
